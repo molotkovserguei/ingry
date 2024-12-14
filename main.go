@@ -1,11 +1,20 @@
 package main
 
 import (
+	"os"
+
 	"github.com/labstack/echo/v4"
 )
 
 func main() {
-	books := NewBooks()
+	// mydb, _ := NewRepoInMem()
+	mydb, err := NewRepoDB()
+	if err != nil {
+		println(err)
+		os.Exit(1)
+	}
+
+	books := NewBooks(mydb)
 	e := echo.New()
 
 	e.GET("/books", books.List)

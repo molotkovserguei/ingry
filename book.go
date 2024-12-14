@@ -1,42 +1,37 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/labstack/echo/v4"
 )
 
-type book struct {
+type Book struct {
 	ID     int    `json:"id"`
 	Title  string `json:"title"`
 	Author string `json:"author"`
-	Year   int    `json:"year"`
+	Year   int    `json:"year" gorm:"column:year_issue"`
 }
 
 type bookStorage struct {
-	mu    sync.RWMutex
-	books map[int]book
-	seq   int
+	booksDB BooksDB
 }
 
-func NewBooks() *bookStorage {
+func NewBooks(repodb RepositoryDB) *bookStorage {
 	return &bookStorage{
-		books: make(map[int]book),
+		booksDB: repodb.Books(),
 	}
 }
 
 func (b *bookStorage) List(c echo.Context) error {
-	b.mu.RLock()
-
-	response := make([]book, 0, len(b.books))
-	for _, v := range b.books {
-		response = append(response, v)
+	response, _, err := b.booksDB.List(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, fmt.Errorf("list books: %w", err).Error())
 	}
 
-	b.mu.RUnlock()
 	return c.JSON(http.StatusOK, response)
 }
 
@@ -47,12 +42,12 @@ func (b *bookStorage) Get(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, fmt.Sprintf("id must be int: %s", err.Error()))
 	}
 
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	response, ok := b.books[int(id)]
-	if !ok {
-		return c.JSON(http.StatusNotFound, fmt.Sprintf("book %s not found", paramID))
+	response, err := b.booksDB.Get(c.Request().Context(), int(id))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return c.JSON(http.StatusNotFound, fmt.Sprintf("book %s not found", paramID))
+		}
+		return c.JSON(http.StatusInternalServerError, fmt.Sprintf("book %s: %s", paramID, err.Error()))
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -68,18 +63,17 @@ func (b *bookStorage) Create(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, fmt.Sprintf("year must be int: %s", err.Error()))
 	}
 
-	b.mu.Lock()
-	b.seq++
-	newBook := book{
-		ID:     b.seq,
-		Title:  title,
-		Author: author,
-		Year:   int(year),
+	newIds, err := b.booksDB.Create(c.Request().Context(),
+		Book{
+			Title:  title,
+			Author: author,
+			Year:   int(year),
+		})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, fmt.Errorf("create book: %w", err).Error())
 	}
-	b.books[b.seq] = newBook
-	b.mu.Unlock()
 
-	return c.String(http.StatusOK, "id:"+strconv.FormatInt(int64(newBook.ID), 10))
+	return c.String(http.StatusOK, "id:"+strconv.FormatInt(int64(newIds[0]), 10))
 }
 
 func (b *bookStorage) Update(c echo.Context) error {
@@ -95,21 +89,19 @@ func (b *bookStorage) Update(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, fmt.Sprintf("year must be int: %s", err.Error()))
 	}
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	_, ok := b.books[int(id)]
-	if !ok {
-		return c.JSON(http.StatusNotFound, fmt.Sprintf("book %s not found", paramID))
-	}
-
-	oneBook := book{
+	oneBook := Book{
 		ID:     int(id),
 		Title:  c.FormValue("title"),
 		Author: c.FormValue("author"),
 		Year:   int(year),
 	}
-	b.books[oneBook.ID] = oneBook
+	err = b.booksDB.Update(c.Request().Context(), oneBook)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return c.JSON(http.StatusNotFound, fmt.Sprintf("book %s not found", paramID))
+		}
+		return c.JSON(http.StatusInternalServerError, fmt.Sprintf("book %s: %s", paramID, err.Error()))
+	}
 
 	return c.JSON(http.StatusOK, oneBook)
 }
@@ -121,15 +113,13 @@ func (b *bookStorage) Delete(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, fmt.Sprintf("id must be int: %s", err.Error()))
 	}
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	_, ok := b.books[int(id)]
-	if !ok {
-		return c.JSON(http.StatusNotFound, fmt.Sprintf("book %s not found", paramID))
+	err = b.booksDB.Delete(c.Request().Context(), int(id))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return c.JSON(http.StatusNotFound, fmt.Sprintf("book %s not found", paramID))
+		}
+		return c.JSON(http.StatusInternalServerError, fmt.Sprintf("book %s: %s", paramID, err.Error()))
 	}
-
-	delete(b.books, int(id))
 
 	return c.NoContent(http.StatusNoContent)
 }
