@@ -1,0 +1,8 @@
+CREATE SCHEMA ing;
+
+CREATE TABLE ing.books (
+    id INT GENERATED ALWAYS AS IDENTITY,
+    title VARCHAR NOT NULL,
+    author CHARACTER VARYING NOT NULL,
+    year_issue INT NOT NULL
+);
