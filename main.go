@@ -17,6 +17,16 @@ func main() {
 	books := NewBooks(mydb)
 	e := echo.New()
 
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			err := next(c)
+			if err != nil {
+				c.Error(err)
+			}
+			return nil
+		}
+	})
+
 	e.GET("/books", books.List)
 	e.GET("/books/", books.List)
 	e.GET("/books/:id", books.Get)
